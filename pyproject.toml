@@ -1,0 +1,21 @@
+[project]
+name = "compliance"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.11.13",
+    "fastapi>=0.115.8",
+    "loguru>=0.7.3",
+    "python-multipart>=0.0.20",
+    "requests>=2.32.3",
+    "tokenizer>=3.4.5",
+    "transformers>=4.49.0",
+    "uvicorn>=0.34.0",
+]
+
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
