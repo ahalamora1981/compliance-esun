@@ -8,12 +8,28 @@
         "key_point_description": null,
         "scenarios": [
           {
-            "scenario_name": "直播内容不宜娱乐化，不得与国家相关精神、社会公序良俗相违背",
-            "scenario_description": null
+            "scenario_type": "simple",
+            "scenario_name": "涉及产品推介的，应注重体现基金行业专业性，严格遵守宣传推介相关法律法规",
+            "scenario_description": null,
+            "image_base64": null
           },
           {
-            "scenario_name": "涉及产品推介的，应注重体现基金行业专业性，严格遵守宣传推介相关法律法规",
-            "scenario_description": null
+            "scenario_type": "award",
+            "scenario_name": "宣传材料必须如实反映基金产品的获奖情况，不得夸大或歪曲基金产品的获奖情况",
+            "scenario_description": null,
+            "image_base64": null
+          }
+        ]
+      },
+      {
+        "key_point_name": "公开募集证券投资基金宣传推介材料管理暂行规定中提到的要求",
+        "key_point_description": null,
+        "scenarios": [
+          {
+            "scenario_type": "simple",
+            "scenario_name": "用词是否出现《公开募集证券投资基金宣传推介材料管理暂行规定》禁止的语言表述，包括违规使用安全、保证、承诺、保险、有保障、高收益、无风险、坐享财富增长、安心享受成长、尽享牛市等可能使投资人认为没有风险或者忽视风险的表述，使用欲购从速、申购良机等片面强调集中营销时间限制的表述等",
+            "scenario_description": null,
+            "image_base64": null
           }
         ]
       }

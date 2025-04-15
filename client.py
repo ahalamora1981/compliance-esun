@@ -5,6 +5,7 @@ from pathlib import Path
 from pydantic import BaseModel
 import time
 import json
+import base64
 
 
 with open(Path(__file__).parent / "config.toml", "rb") as f:
@@ -168,11 +169,34 @@ def test_check():
     with open(f"output/check_task_output_{time.strftime('%y_%m_%dT%H_%M_%S')}.json", "w") as f:
         json.dump(response.json(), f, indent=2, ensure_ascii=False)
 
+
+@timer
+def test_get_fund_names():
+    url = f"{BASE_URL}/get-fund-names"
     
+    # load image from file and convert to base64
+    with open("image/万家01.jpg", "rb") as f:
+        image_base64 = base64.b64encode(f.read()).decode('utf-8')
+        image_base64 = f"data:image/jpeg;base64,{image_base64}"
+        
+    json_data = {
+        "image_base64": image_base64
+    }
+    
+    response = requests.post(
+        url=url,
+        json=json_data,
+        headers={"Content-Type": "application/json"}
+    )
+    response.raise_for_status()
+    
+    print(response.json())
+
 if __name__ == "__main__":
-    # BASE_URL = "http://localhost:8000"
-    BASE_URL = "http://10.101.100.13:8010"
+    BASE_URL = "http://localhost:8000"
+    # BASE_URL = "http://10.101.100.13:8010"
     
     # test_correction()
     # test_summary()
-    test_check()
+    # test_check()
+    test_get_fund_names()

@@ -6,6 +6,8 @@ import re
 import time
 from pathlib import Path
 # from tqdm import tqdm
+from textwrap import dedent
+import requests
 
 from fastapi import FastAPI, HTTPException
 from loguru import logger
@@ -44,12 +46,22 @@ MAX_TOKENS_QWEN = config["vllm-qwen25-72b"]["max_tokens"]
 TEMPERATURE_QWEN = config["vllm-qwen25-72b"]["temperature"]
 MAX_INPUT_LENGTH_QWEN = MAX_CONTEXT_LENGTH_QWEN - MAX_TOKENS_QWEN
 
+VLLM_HOST_QWEN_VL = config["vllm-qwen25-vl-32b"]["host"]
+VLLM_PORT_QWEN_VL = config["vllm-qwen25-vl-32b"]["port"]
+MAX_CONTEXT_LENGTH_QWEN_VL = int(config["vllm-qwen25-vl-32b"]["max_context_length"] * 0.95)
+MAX_TOKENS_QWEN_VL = config["vllm-qwen25-vl-32b"]["max_tokens"]
+TEMPERATURE_QWEN_VL = config["vllm-qwen25-vl-32b"]["temperature"]
+MAX_INPUT_LENGTH_QWEN_VL = MAX_CONTEXT_LENGTH_QWEN_VL - MAX_TOKENS_QWEN_VL
+
 VLLM_HOST_DEEPSEEK = config["vllm-deepseek-r1-32b"]["host"]
 VLLM_PORT_DEEPSEEK = config["vllm-deepseek-r1-32b"]["port"]
 MAX_CONTEXT_LENGTH_DEEPSEEK = int(config["vllm-deepseek-r1-32b"]["max_context_length"] * 0.95)
 MAX_TOKENS_DEEPSEEK = config["vllm-deepseek-r1-32b"]["max_tokens"]
 TEMPERATURE_DEEPSEEK = config["vllm-deepseek-r1-32b"]["temperature"]
 MAX_INPUT_LENGTH_DEEPSEEK = MAX_CONTEXT_LENGTH_DEEPSEEK - MAX_TOKENS_DEEPSEEK
+
+VECTOR_DB_HOST = config["vector-db"]["host"]
+VECTOR_DB_PORT = config["vector-db"]["port"]
 
 vllm_qwen = VllmClient(
     VLLM_HOST_QWEN, 
@@ -87,7 +99,7 @@ tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
 app = FastAPI()
 
-def parse_json(text):
+def parse_json(text: str) -> dict | None:
     # 使用正则表达式提取JSON字符串
     json_match = re.search(r'```json(.*?)```', text, re.DOTALL)
     
@@ -107,6 +119,7 @@ def parse_json(text):
 def count_tokens(prompt: str) -> int:
     tokens = tokenizer.encode(prompt, add_special_tokens=True)
     return len(tokens)
+
 
 class Request(BaseModel):
     prompt: str
@@ -208,6 +221,7 @@ async def summary(request: Request):
 class Scenario(BaseModel):  
     scenario_name: str
     scenario_description: str | None = None
+    scenario_reference: str | None = None
     
 class KeyPoint(BaseModel):
     key_point_name: str
@@ -261,6 +275,9 @@ async def check_task(request: CheckTaskRequest):
                     scenario_name = request.task.key_points[i].scenarios[j].scenario_name,
                     scenario_description = request.task.key_points[i].scenarios[j].scenario_description
                 )
+                
+                if request.task.key_points[i].scenarios[j].scenario_reference:
+                    system_prompt_scenario += f"\n\n## 参考资料\n{request.task.key_points[i].scenarios[j].scenario_reference}"
             except Exception as e:
                 logger.error(e)
                 raise HTTPException(status_code=500, detail=str(e))
@@ -369,7 +386,137 @@ async def check_task(request: CheckTaskRequest):
         result_json
     )
 
+def ask_image(prompt: str, image_base64: str, system_prompt: str | None = None, history: list | None =None) -> str:
+    url = f"http://{VLLM_HOST_QWEN_VL}:{VLLM_PORT_QWEN_VL}/ask-image"
+    
+    payload = {
+        "prompt": prompt,
+        "image_base64": image_base64,
+        "system_prompt": system_prompt or "",
+        "history": history or [],
+        "max_tokens": MAX_TOKENS_QWEN_VL,
+        "temperature": TEMPERATURE_QWEN_VL
+    }
+    
+    response = requests.post(url, json=payload)
+    response.raise_for_status()
+    
+    return response.json()["content"]
 
+def query_vector_db(
+    collection_name: str,
+    query: str,
+    n_results: int = 10,
+    rerank: bool = True,
+    metadata_filter: dict = {}
+) -> dict:
+    end_point = "query"
+    
+    url = f"http://{VECTOR_DB_HOST}:{VECTOR_DB_PORT}/{end_point}"
+    
+    payload = json.dumps({
+        "collection_name": collection_name,
+        "query": query,
+        "n_results": n_results,
+        "rerank": rerank,
+        "metadata_filter": metadata_filter
+    })
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    response = requests.request("POST", url, headers=headers, data=payload)
+    response.raise_for_status()
+
+    return response.json()
+
+class GetFundNamesRequest(BaseModel):
+    image_base64: str
+
+
+class FundNameMatch(BaseModel):
+    fund_name_raw: str
+    fund_name_real: str
+    is_same_fund: bool
+    fund_id: str
+
+class GetFundNamesResponse(BaseModel):
+    fund_names: list[FundNameMatch]
+
+
+@app.post("/get-fund-names", response_model=GetFundNamesResponse)
+async def get_fund_names(request: GetFundNamesRequest):
+    # 从图片中提取基金名称
+    system_prompt = dedent("""
+    # 任务：输出基金名称
+    
+    ## 指令
+    - 从图片中提取所有基金名称
+    - 注意不要遗漏任何一个基金名称
+    - 以列表的形式列出基金名称，并输出到json格式
+    
+    ## 输出格式
+    ```json
+    {
+        "fund_names": ["基金名称1", "基金名称2", ...]
+    }
+    ```
+    """)
+    prompt = "执行任务：输出基金名称"
+    
+    response = ask_image(prompt, request.image_base64, system_prompt)
+    
+    try:
+        result_json = parse_json(response)
+    except Exception as e:
+        logger.info("Failed to parse JSON")
+        logger.error(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    fund_names = result_json["fund_names"]
+    
+    # 根据基金名称在向量数据库中匹配基金名称
+    fund_names_matched = []
+    
+    for fund_name_raw in fund_names:
+        result = query_vector_db(
+            collection_name="private_fund_names",
+            query=fund_name_raw,
+            n_results=1
+        )
+        fund_name_real = result['data']['metadatas'][0][0]['document_name']
+        fund_id = result['data']['metadatas'][0][0]['document_id']
+        
+        response = vllm_qwen.chat(
+            prompt=f"基金名称1：{fund_name_raw}\n基金名称2：{fund_name_real}",
+            system_prompt=dedent("""
+            # 任务：判断是否为同一支基金
+
+            ## 指令
+            - 判断基金名称1和基金名称2是否为同一支基金
+
+            ## 输出格式
+            True or False
+            """),
+            max_tokens=MAX_TOKENS_QWEN,
+            temperature=TEMPERATURE_QWEN
+        )
+        
+        print(response)
+        
+        fund_names_matched.append(FundNameMatch.model_validate({
+            "fund_name_raw": fund_name_raw,
+            "fund_name_real": fund_name_real,
+            "is_same_fund": "true" in response.lower(),
+            "fund_id": fund_id
+        }))
+    
+    return GetFundNamesResponse.model_validate({
+        "fund_names": fund_names_matched
+    })
+    
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

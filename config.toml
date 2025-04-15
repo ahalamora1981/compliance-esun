@@ -8,7 +8,7 @@ timeout_keep_alive = 1800
 host = "10.101.100.11"
 port = 8021
 max_context_length = 15_000  # 限制上下文长度
-max_tokens = 2_000  # 限制生成的token数量
+max_tokens = 4_000  # 限制生成的token数量
 temperature = 0
 
 # VLLM with Deepseek R1 32B 8bit - 20K Context
@@ -19,6 +19,18 @@ max_context_length = 15_000  # 限制上下文长度
 max_tokens = 4_000  # 限制生成的token数量
 temperature = 0
 
+# VLLM VL with Qwen 2.5 VL 32B 8bit - 15K Context
+[vllm-qwen25-vl-32b]
+host = "10.101.100.11"
+port = 8028
+max_context_length = 15_000  # 限制上下文长度
+max_tokens = 4_000  # 限制生成的token数量
+temperature = 0
+
+[vector-db]
+host = "10.101.100.13"
+port = 8105
+
 [check-scenario]
-llm_for_scenario = "deepseek"  # "qwen" or "deepseek"
+llm_for_scenario = "qwen"  # "qwen" or "deepseek"
 concurrent_limit = 2  # 限制并发数量，可选项：1，2，3，4
