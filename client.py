@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import time
 import json
 import base64
+from tqdm import tqdm
 
 
 with open(Path(__file__).parent / "config.toml", "rb") as f:
@@ -143,22 +144,24 @@ def test_summary():
 @timer
 def test_check():
     url = f"{BASE_URL}/check-task"
-    check_task_request_file_name = "check_task_request_test.json"
     
-    # with open(Path(__file__).parent / "prompts" / "check" / "system_prompt_task.txt", "r") as f:
-    #     system_prompt_task = f.read()
-    # with open(Path(__file__).parent / "prompts" / "check" / "system_prompt_scenario.txt", "r") as f:
-    #     system_prompt_scenario = f.read()
-    # with open(Path(__file__).parent / "prompts" / "check" / "content.txt", "r") as f:
-    #     content = f.read()
+    # TEXT
+    # file_name = "check_task_request_text.json"
+    # with open(Path(__file__).parent / "prompts" / "check" / file_name, "r") as f:
+    #     request_data = json.load(f)
     
-    with open(Path(__file__).parent / "prompts" / "check" / check_task_request_file_name, "r") as f:
+    # IMAGE
+    file_name = "check_task_request_image.json"
+    with open(Path(__file__).parent / "prompts" / "check" / file_name, "r") as f:
         request_data = json.load(f)
+        
+    with open(Path(__file__).parent / "image" / "万家01.jpg", "rb") as f:
+        image_base64 = base64.b64encode(f.read()).decode('utf-8')
+        image_base64 = f"data:image/jpeg;base64,{image_base64}"
+    request_data['content'] = image_base64
+    print(len(request_data['content']))
     
-    # request_data['system_prompt_task'] = system_prompt_task
-    # request_data['system_prompt_scenario'] = system_prompt_scenario
-    # request_data['content'] = content
-    
+    # SEND REQUEST
     response = requests.post(
         url=url,
         json=request_data,
@@ -171,11 +174,11 @@ def test_check():
 
 
 @timer
-def test_get_fund_names():
+def test_get_fund_names(image_path: str):
     url = f"{BASE_URL}/get-fund-names"
     
     # load image from file and convert to base64
-    with open("image/万家01.jpg", "rb") as f:
+    with open(image_path, "rb") as f:
         image_base64 = base64.b64encode(f.read()).decode('utf-8')
         image_base64 = f"data:image/jpeg;base64,{image_base64}"
         
@@ -190,13 +193,62 @@ def test_get_fund_names():
     )
     response.raise_for_status()
     
-    print(response.json())
+    print(json.dumps(response.json(), indent=2, ensure_ascii=False))
 
+def add_document(
+    collection_name: str, 
+    document_name: str,
+    document_id: str,
+    document: str,
+    metadata: dict[str, str | int | float] | None = None,
+    chunk_size: int | None = None,
+    chunk_overlap: int | None = None
+) -> dict:
+    end_point = "add-document"
+    url = f"http://{config['vector-db']['host']}:{config['vector-db']['port']}/{end_point}"
+
+    payload = json.dumps({
+        "collection_name": collection_name,
+        "document_name": document_name,
+        "document_id": document_id,
+        "document": document,
+        "metadata": metadata or {},
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap
+    })
+    headers = {
+        'Content-Type': 'application/json'
+    }
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+    response.raise_for_status()
+    
+    return response.json()
+
+
+def test_add_fund_names():
+    with open(Path(__file__).parent / "docs" / "all_public_fund.txt", "r") as f:
+        content = f.read()
+    
+    funds = content.split("| 基金吧 | 档案")
+    
+    for fund in tqdm(funds):
+        fund_id = fund[1:7]
+        fund_name = fund[8:]
+        add_document(
+            collection_name=config["vector-db"]["collection_name"],
+            document_name=fund_name,
+            document_id=fund_id,
+            document=fund_name
+        )
+    
+    
 if __name__ == "__main__":
     BASE_URL = "http://localhost:8000"
     # BASE_URL = "http://10.101.100.13:8010"
     
     # test_correction()
     # test_summary()
-    # test_check()
-    test_get_fund_names()
+    test_check()
+    # test_get_fund_names(image_path="image/万家01.jpg")
+    # test_add_fund_names()

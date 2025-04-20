@@ -19,20 +19,16 @@ from llm.vllm import VllmClient
 import tomllib
 
 
-CHECK_OUTPUT_JSON_FORMAT = json.dumps(
-    {
-        "检查结论": "(直接陈述您的结论，确保简洁明了)",
-        "风险等级": "(提供问题相关的风险等级，使用清晰的评级，如“无风险”、“低风险”、“中风险”、“高风险”)",
-        "风险依据": "(解释支持您结论的风险依据，包括数据、研究或逻辑推理)",
-        "优化建议": "(提供优化建议，包括更改方案、降低风险等等)"
-    },
-    ensure_ascii=False
-)
-
 # 加载配置
 with open(Path(__file__).parent / "config.toml", "rb") as f:
     config = tomllib.load(f)
-
+    
+with open(Path(__file__).parent / "prompts" / "check" / "system_prompt_task.txt", "r") as f:
+    SYSTEM_PROMPT_TASK = f.read()
+    
+with open(Path(__file__).parent / "prompts" / "check" / "system_prompt_scenario.txt", "r") as f:
+    SYSTEM_PROMPT_SCENARIO = f.read()
+    
 if config["check-scenario"]["concurrent_limit"] not in [1, 2, 3, 4]:
     raise ValueError("Concurrent limit must be 1, 2, 3, or 4") 
 
@@ -62,6 +58,7 @@ MAX_INPUT_LENGTH_DEEPSEEK = MAX_CONTEXT_LENGTH_DEEPSEEK - MAX_TOKENS_DEEPSEEK
 
 VECTOR_DB_HOST = config["vector-db"]["host"]
 VECTOR_DB_PORT = config["vector-db"]["port"]
+VECTOR_DB_COLLECTION_NAME = config["vector-db"]["collection_name"]
 
 vllm_qwen = VllmClient(
     VLLM_HOST_QWEN, 
@@ -235,10 +232,10 @@ class Task(BaseModel):
 
 class CheckTaskRequest(BaseModel):
     task: Task
+    media_type: str
     content: str
     content_type: str
-    system_prompt_scenario: str
-    system_prompt_task: str
+    content_metadata: str
     
 class CheckTaskResponse(BaseModel):
     检查结论: str
@@ -268,8 +265,9 @@ async def check_task(request: CheckTaskRequest):
     for i in range(len(request.task.key_points)):
         for j in range(len(request.task.key_points[i].scenarios)):
             try:
-                system_prompt_scenario = request.system_prompt_scenario.format(
+                system_prompt_scenario = SYSTEM_PROMPT_SCENARIO.format(
                     content_type = request.content_type,
+                    content_metadata = request.content_metadata,
                     key_point_name = request.task.key_points[i].key_point_name,
                     key_point_description = request.task.key_points[i].key_point_description,
                     scenario_name = request.task.key_points[i].scenarios[j].scenario_name,
@@ -282,16 +280,22 @@ async def check_task(request: CheckTaskRequest):
                 logger.error(e)
                 raise HTTPException(status_code=500, detail=str(e))
             
-            if count_tokens(system_prompt_scenario + request.content) > max_input_length:
-                error_scenario = request.task.key_points[i].scenarios[j].scenario_name
-                error_msg = f"Scenario {error_scenario} exceeds token limit {max_input_length}"
-                raise HTTPException(status_code=400, detail=error_msg)
+            if request.media_type == "text":
+                if count_tokens(system_prompt_scenario + request.content) > max_input_length:
+                    error_scenario = request.task.key_points[i].scenarios[j].scenario_name
+                    error_msg = f"Scenario {error_scenario} exceeds token limit {max_input_length}"
+                    raise HTTPException(status_code=400, detail=error_msg)
+            elif request.media_type == "image":
+                if len(request.content) > 10_000_000:
+                    raise HTTPException(status_code=400, detail="Image exceeds base64 size limit: 10MB")
+            else:
+                raise HTTPException(status_code=400, detail="Invalid media type")
             
             system_prompt_list.append(system_prompt_scenario)
-
-    ##################################
-    ### Syncronously call DeepSeek ###
-    ##################################
+            
+    ###################################
+    ### Syncronously Scenario Check ###
+    ###################################
     # check_result_scenarios = []
     # for system_prompt in tqdm(system_prompt_list):
     #     result = vllm_scenario.chat(
@@ -309,22 +313,31 @@ async def check_task(request: CheckTaskRequest):
     
     # check_result_scenarios_str = "\n\n--\n\n".join(check_result_scenarios)
     
-    ###################################
-    ### Asyncronously call DeepSeek ###
-    ###################################
+    ####################################
+    ### Asyncronously Scenario Check ###
+    ####################################
     concurrency_limit = config["check-scenario"]["concurrent_limit"]
     semaphore = Semaphore(concurrency_limit)
     
     # Create a list of coroutines to run concurrently
-    async def process_prompt(system_prompt):
+    async def check_scenario(system_prompt):
         try:
             async with semaphore:
-                result = await vllm_scenario.async_chat(
-                    prompt=request.content, 
-                    system_prompt=system_prompt,
-                    max_tokens=max_tokens,
-                    temperature=temperature
-                )
+                if request.media_type == "text":
+                    result = await vllm_scenario.async_chat(
+                        prompt=request.content or "执行系统指令",
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature
+                    )
+                elif request.media_type == "image":
+                    result = await ask_image(
+                        prompt="执行系统指令",
+                        image_base64=request.content,
+                        system_prompt=system_prompt
+                    )
+                else:
+                    raise HTTPException(status_code=400, detail="Invalid media type")
                 
                 # 如果是R1模型，则去掉思考的部分
                 if "</think>" in result:
@@ -338,7 +351,7 @@ async def check_task(request: CheckTaskRequest):
     try:
         # Run all prompts concurrently and collect results
         start_time = time.time()
-        tasks = [process_prompt(prompt) for prompt in system_prompt_list]
+        tasks = [check_scenario(prompt) for prompt in system_prompt_list]
         check_result_scenarios = await asyncio.gather(*tasks)
         elapsed_time = time.time() - start_time
         print(f"Async execution time: {elapsed_time:.2f} seconds")
@@ -348,27 +361,55 @@ async def check_task(request: CheckTaskRequest):
         logger.error(e)
         raise HTTPException(status_code=500, detail=str(e))
     
+    print(check_result_scenarios_str)
+    
     ##################
     ### Check task ###
     ##################
-    system_prompt_task = request.system_prompt_task.format(
+    output_json_format = "```json\n" + json.dumps(
+        {
+            "检查结论": "直接陈述您的结论，确保简洁明了(type: str)",
+            "风险等级": "提供问题相关的风险等级，使用清晰的评级，如“无风险”、“低风险”、“中风险”、“高风险”(type: str)",
+            "风险依据": "解释支持您结论的风险依据，包括数据、研究或逻辑推理(type: str)",
+            "优化建议": "提供优化建议，包括更改方案、降低风险等等(type: str)"
+        },
+        ensure_ascii=False
+    ) + "\n```"
+    
+    system_prompt_task = SYSTEM_PROMPT_TASK.format(
         content_type = request.content_type,
+        content_metadata = request.content_metadata,
         task_name = request.task.task_name,
         task_description = request.task.task_description,
-        check_result_scenarios = check_result_scenarios_str,
-        output_json_format = "```json\n" + CHECK_OUTPUT_JSON_FORMAT + "\n```"
+        output_json_format = output_json_format,
+        check_result_scenarios = check_result_scenarios_str
     )
     
-    if count_tokens(system_prompt_task + request.content) > MAX_INPUT_LENGTH_QWEN:
-        raise HTTPException(status_code=400, detail="System prompt and content exceeds token limit")
+    if request.media_type == "text":
+        if count_tokens(system_prompt_task + request.content) > MAX_INPUT_LENGTH_QWEN:
+            raise HTTPException(status_code=400, detail="System prompt and content exceeds token limit")
+    elif request.media_type == "image":
+        pass
+    else:
+        raise HTTPException(status_code=400, detail="Invalid media type")
     
     try:
-        result = vllm_qwen.chat(
-            prompt=request.content, 
-            system_prompt=system_prompt_task,
-            max_tokens=MAX_TOKENS_QWEN,
-            temperature=TEMPERATURE_QWEN
-        )
+        if request.media_type == "text":
+            result = vllm_qwen.chat(
+                prompt=request.content or "执行系统指令", 
+                system_prompt=system_prompt_task,
+                max_tokens=MAX_TOKENS_QWEN,
+                temperature=TEMPERATURE_QWEN
+            )
+        elif request.media_type == "image":
+            result = vllm_qwen.chat(
+                prompt="执行系统指令", 
+                system_prompt=system_prompt_task,
+                max_tokens=MAX_TOKENS_QWEN,
+                temperature=TEMPERATURE_QWEN
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid media type")
     except Exception as e:
         logger.error(e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -386,7 +427,7 @@ async def check_task(request: CheckTaskRequest):
         result_json
     )
 
-def ask_image(prompt: str, image_base64: str, system_prompt: str | None = None, history: list | None =None) -> str:
+async def ask_image(prompt: str, image_base64: str, system_prompt: str | None = None, history: list | None =None) -> str:
     url = f"http://{VLLM_HOST_QWEN_VL}:{VLLM_PORT_QWEN_VL}/ask-image"
     
     payload = {
@@ -481,7 +522,7 @@ async def get_fund_names(request: GetFundNamesRequest):
     
     for fund_name_raw in fund_names:
         result = query_vector_db(
-            collection_name="private_fund_names",
+            collection_name=VECTOR_DB_COLLECTION_NAME,
             query=fund_name_raw,
             n_results=1
         )
@@ -505,6 +546,30 @@ async def get_fund_names(request: GetFundNamesRequest):
         
         print(response)
         
+        if "true" not in response.lower():
+            result = query_vector_db(
+                collection_name=VECTOR_DB_COLLECTION_NAME,
+                query=fund_name_raw,
+                n_results=10
+            )
+            fund_name_real = result['data']['metadatas'][0][0]['document_name']
+            fund_id = result['data']['metadatas'][0][0]['document_id']
+            
+            response = vllm_qwen.chat(
+                prompt=f"基金名称1：{fund_name_raw}\n基金名称2：{fund_name_real}",
+                system_prompt=dedent("""
+                # 任务：判断是否为同一支基金
+
+                ## 指令
+                - 判断基金名称1和基金名称2是否为同一支基金
+
+                ## 输出格式
+                True or False
+                """),
+                max_tokens=MAX_TOKENS_QWEN,
+                temperature=TEMPERATURE_QWEN
+            )
+        
         fund_names_matched.append(FundNameMatch.model_validate({
             "fund_name_raw": fund_name_raw,
             "fund_name_real": fund_name_real,
@@ -515,8 +580,8 @@ async def get_fund_names(request: GetFundNamesRequest):
     return GetFundNamesResponse.model_validate({
         "fund_names": fund_names_matched
     })
-    
-    
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

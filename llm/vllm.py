@@ -115,7 +115,7 @@ class VllmClient:
         history: list | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None
-    ):
+    ) -> str:
         if max_tokens is None:
             max_tokens = self.max_tokens
         if temperature is None:

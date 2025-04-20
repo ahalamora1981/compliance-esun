@@ -3,15 +3,15 @@ host = "0.0.0.0"
 port = 8000
 timeout_keep_alive = 1800
 
-# VLLM with Qwen 2.5 72B 8bit - 15K Context
+# VLLM with Qwen 2.5 72B 8bit - 24K Context
 [vllm-qwen25-72b]
 host = "10.101.100.11"
 port = 8021
-max_context_length = 15_000  # 限制上下文长度
+max_context_length = 24_000  # 限制上下文长度
 max_tokens = 4_000  # 限制生成的token数量
 temperature = 0
 
-# VLLM with Deepseek R1 32B 8bit - 20K Context
+# VLLM with Deepseek R1 32B 8bit - 15K Context
 [vllm-deepseek-r1-32b]
 host = "10.101.100.11"
 port = 8025
@@ -30,6 +30,7 @@ temperature = 0
 [vector-db]
 host = "10.101.100.13"
 port = 8105
+collection_name = "test_all_funds_0415"
 
 [check-scenario]
 llm_for_scenario = "qwen"  # "qwen" or "deepseek"
