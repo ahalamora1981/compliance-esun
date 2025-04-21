@@ -145,21 +145,9 @@ def test_summary():
 def test_check():
     url = f"{BASE_URL}/check-task"
     
-    # TEXT
-    # file_name = "check_task_request_text.json"
-    # with open(Path(__file__).parent / "prompts" / "check" / file_name, "r") as f:
-    #     request_data = json.load(f)
-    
-    # IMAGE
-    file_name = "check_task_request_image.json"
+    file_name = "check_task_request_test.json"
     with open(Path(__file__).parent / "prompts" / "check" / file_name, "r") as f:
         request_data = json.load(f)
-        
-    with open(Path(__file__).parent / "image" / "万家01.jpg", "rb") as f:
-        image_base64 = base64.b64encode(f.read()).decode('utf-8')
-        image_base64 = f"data:image/jpeg;base64,{image_base64}"
-    request_data['content'] = image_base64
-    print(len(request_data['content']))
     
     # SEND REQUEST
     response = requests.post(

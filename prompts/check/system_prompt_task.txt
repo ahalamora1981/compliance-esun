@@ -41,8 +41,5 @@
   - 中国外汇交易中心暨全国银行间同业拆借中心（交易中心）
   - 中国证券投资者保护基金公司
 
-## {content_type}基本信息
-{content_metadata}
-
 ## 输出格式
 {output_json_format}

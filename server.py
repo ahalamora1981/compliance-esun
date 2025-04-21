@@ -49,13 +49,6 @@ MAX_TOKENS_QWEN_VL = config["vllm-qwen25-vl-32b"]["max_tokens"]
 TEMPERATURE_QWEN_VL = config["vllm-qwen25-vl-32b"]["temperature"]
 MAX_INPUT_LENGTH_QWEN_VL = MAX_CONTEXT_LENGTH_QWEN_VL - MAX_TOKENS_QWEN_VL
 
-VLLM_HOST_DEEPSEEK = config["vllm-deepseek-r1-32b"]["host"]
-VLLM_PORT_DEEPSEEK = config["vllm-deepseek-r1-32b"]["port"]
-MAX_CONTEXT_LENGTH_DEEPSEEK = int(config["vllm-deepseek-r1-32b"]["max_context_length"] * 0.95)
-MAX_TOKENS_DEEPSEEK = config["vllm-deepseek-r1-32b"]["max_tokens"]
-TEMPERATURE_DEEPSEEK = config["vllm-deepseek-r1-32b"]["temperature"]
-MAX_INPUT_LENGTH_DEEPSEEK = MAX_CONTEXT_LENGTH_DEEPSEEK - MAX_TOKENS_DEEPSEEK
-
 VECTOR_DB_HOST = config["vector-db"]["host"]
 VECTOR_DB_PORT = config["vector-db"]["port"]
 VECTOR_DB_COLLECTION_NAME = config["vector-db"]["collection_name"]
@@ -65,13 +58,6 @@ vllm_qwen = VllmClient(
     VLLM_PORT_QWEN, 
     MAX_TOKENS_QWEN,
     TEMPERATURE_QWEN
-)
-
-vllm_ds = VllmClient(
-    VLLM_HOST_DEEPSEEK, 
-    VLLM_PORT_DEEPSEEK, 
-    MAX_TOKENS_DEEPSEEK,
-    TEMPERATURE_DEEPSEEK
 )
 
 # 创建日志目录
@@ -232,10 +218,10 @@ class Task(BaseModel):
 
 class CheckTaskRequest(BaseModel):
     task: Task
-    media_type: str
     content: str
     content_type: str
-    content_metadata: str
+    system_prompt_scenario: str
+    system_prompt_task: str
     
 class CheckTaskResponse(BaseModel):
     检查结论: str
@@ -246,72 +232,35 @@ class CheckTaskResponse(BaseModel):
 
 @app.post("/check-task", response_model=CheckTaskResponse)
 async def check_task(request: CheckTaskRequest):
-    llm_for_scenario = config["check-scenario"]["llm_for_scenario"]
-    
-    if llm_for_scenario == "qwen":
-        max_input_length = MAX_CONTEXT_LENGTH_QWEN
-        max_tokens = MAX_TOKENS_QWEN
-        temperature = TEMPERATURE_QWEN
-        vllm_scenario = vllm_qwen
-    elif llm_for_scenario == "deepseek":
-        max_input_length = MAX_CONTEXT_LENGTH_DEEPSEEK
-        max_tokens = MAX_TOKENS_DEEPSEEK
-        temperature = TEMPERATURE_DEEPSEEK
-        vllm_scenario = vllm_ds
-    else:
-        raise HTTPException(status_code=400, detail="Invalid LLM for scenario")
+    max_input_length = MAX_CONTEXT_LENGTH_QWEN
+    max_tokens = MAX_TOKENS_QWEN
+    temperature = TEMPERATURE_QWEN
+    vllm_scenario = vllm_qwen
     
     system_prompt_list = []
     for i in range(len(request.task.key_points)):
         for j in range(len(request.task.key_points[i].scenarios)):
             try:
-                system_prompt_scenario = SYSTEM_PROMPT_SCENARIO.format(
+                system_prompt_scenario_template = request.system_prompt_scenario or SYSTEM_PROMPT_SCENARIO
+                
+                system_prompt_scenario = system_prompt_scenario_template.format(
                     content_type = request.content_type,
-                    content_metadata = request.content_metadata,
                     key_point_name = request.task.key_points[i].key_point_name,
                     key_point_description = request.task.key_points[i].key_point_description,
                     scenario_name = request.task.key_points[i].scenarios[j].scenario_name,
-                    scenario_description = request.task.key_points[i].scenarios[j].scenario_description
+                    scenario_description = request.task.key_points[i].scenarios[j].scenario_description,
+                    scenario_reference = request.task.key_points[i].scenarios[j].scenario_reference
                 )
-                
-                if request.task.key_points[i].scenarios[j].scenario_reference:
-                    system_prompt_scenario += f"\n\n## 参考资料\n{request.task.key_points[i].scenarios[j].scenario_reference}"
             except Exception as e:
                 logger.error(e)
                 raise HTTPException(status_code=500, detail=str(e))
             
-            if request.media_type == "text":
-                if count_tokens(system_prompt_scenario + request.content) > max_input_length:
-                    error_scenario = request.task.key_points[i].scenarios[j].scenario_name
-                    error_msg = f"Scenario {error_scenario} exceeds token limit {max_input_length}"
-                    raise HTTPException(status_code=400, detail=error_msg)
-            elif request.media_type == "image":
-                if len(request.content) > 10_000_000:
-                    raise HTTPException(status_code=400, detail="Image exceeds base64 size limit: 10MB")
-            else:
-                raise HTTPException(status_code=400, detail="Invalid media type")
+            if count_tokens(system_prompt_scenario + request.content) > max_input_length:
+                error_scenario = request.task.key_points[i].scenarios[j].scenario_name
+                error_msg = f"Scenario {error_scenario} exceeds token limit {max_input_length}"
+                raise HTTPException(status_code=400, detail=error_msg)
             
             system_prompt_list.append(system_prompt_scenario)
-            
-    ###################################
-    ### Syncronously Scenario Check ###
-    ###################################
-    # check_result_scenarios = []
-    # for system_prompt in tqdm(system_prompt_list):
-    #     result = vllm_scenario.chat(
-    #         prompt=request.content, 
-    #         system_prompt=system_prompt,
-    #         max_tokens=max_tokens,
-    #         temperature=temperature
-    #     )
-        
-    #     # 如果是R1模型，则去掉思考的部分
-    #     if "</think>" in result:
-    #         result = result.split("</think>")[-1]
-            
-    #     check_result_scenarios.append(result.strip())
-    
-    # check_result_scenarios_str = "\n\n--\n\n".join(check_result_scenarios)
     
     ####################################
     ### Asyncronously Scenario Check ###
@@ -323,26 +272,12 @@ async def check_task(request: CheckTaskRequest):
     async def check_scenario(system_prompt):
         try:
             async with semaphore:
-                if request.media_type == "text":
-                    result = await vllm_scenario.async_chat(
-                        prompt=request.content or "执行系统指令",
-                        system_prompt=system_prompt,
-                        max_tokens=max_tokens,
-                        temperature=temperature
-                    )
-                elif request.media_type == "image":
-                    result = await ask_image(
-                        prompt="执行系统指令",
-                        image_base64=request.content,
-                        system_prompt=system_prompt
-                    )
-                else:
-                    raise HTTPException(status_code=400, detail="Invalid media type")
-                
-                # 如果是R1模型，则去掉思考的部分
-                if "</think>" in result:
-                    result = result.split("</think>")[-1]
-                    
+                result = await vllm_scenario.async_chat(
+                    prompt=request.content or "执行系统指令",
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
                 return result.strip()
         except Exception as e:
             logger.error(e)
@@ -361,8 +296,6 @@ async def check_task(request: CheckTaskRequest):
         logger.error(e)
         raise HTTPException(status_code=500, detail=str(e))
     
-    print(check_result_scenarios_str)
-    
     ##################
     ### Check task ###
     ##################
@@ -376,40 +309,26 @@ async def check_task(request: CheckTaskRequest):
         ensure_ascii=False
     ) + "\n```"
     
-    system_prompt_task = SYSTEM_PROMPT_TASK.format(
+    system_prompt_task_template = request.system_prompt_task or SYSTEM_PROMPT_TASK
+    
+    system_prompt_task = system_prompt_task_template.format(
         content_type = request.content_type,
-        content_metadata = request.content_metadata,
         task_name = request.task.task_name,
         task_description = request.task.task_description,
-        output_json_format = output_json_format,
-        check_result_scenarios = check_result_scenarios_str
+        check_result_scenarios = check_result_scenarios_str,
+        output_json_format = output_json_format
     )
     
-    if request.media_type == "text":
-        if count_tokens(system_prompt_task + request.content) > MAX_INPUT_LENGTH_QWEN:
-            raise HTTPException(status_code=400, detail="System prompt and content exceeds token limit")
-    elif request.media_type == "image":
-        pass
-    else:
-        raise HTTPException(status_code=400, detail="Invalid media type")
+    if count_tokens(system_prompt_task + request.content) > MAX_INPUT_LENGTH_QWEN:
+        raise HTTPException(status_code=400, detail="System prompt and content exceeds token limit")
     
     try:
-        if request.media_type == "text":
-            result = vllm_qwen.chat(
-                prompt=request.content or "执行系统指令", 
-                system_prompt=system_prompt_task,
-                max_tokens=MAX_TOKENS_QWEN,
-                temperature=TEMPERATURE_QWEN
-            )
-        elif request.media_type == "image":
-            result = vllm_qwen.chat(
-                prompt="执行系统指令", 
-                system_prompt=system_prompt_task,
-                max_tokens=MAX_TOKENS_QWEN,
-                temperature=TEMPERATURE_QWEN
-            )
-        else:
-            raise HTTPException(status_code=400, detail="Invalid media type")
+        result = vllm_qwen.chat(
+            prompt=request.content or "执行系统指令", 
+            system_prompt=system_prompt_task,
+            max_tokens=MAX_TOKENS_QWEN,
+            temperature=TEMPERATURE_QWEN,
+        )
     except Exception as e:
         logger.error(e)
         raise HTTPException(status_code=500, detail=str(e))

@@ -55,7 +55,8 @@ class VllmClient:
         system_prompt: str = "", 
         history: list | None = None,
         max_tokens: int | None = None,
-        temperature: float | None = None
+        temperature: float | None = None,
+        extra_body: dict | None = None
     ):
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -69,7 +70,8 @@ class VllmClient:
             "system_prompt": system_prompt,
             "history": history or [],
             "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": temperature,
+            "extra_body": extra_body or {},
         }
         
         response = requests.post(url, json=payload)
@@ -83,7 +85,8 @@ class VllmClient:
         system_prompt="", 
         history=None,
         max_tokens: int | None = None,
-        temperature: float | None = None
+        temperature: float | None = None,
+        extra_body: dict | None = None,
     ):
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -97,11 +100,17 @@ class VllmClient:
             "system_prompt": system_prompt,
             "history": history or [],
             "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": temperature,
+            "extra_body": extra_body or {},
         }
         
         response = requests.post(url, json=payload, stream=True)
         response.raise_for_status()
+        
+        for line in response.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                yield chunk["content"]
         
         for line in response.iter_lines():
             if line:
@@ -114,7 +123,8 @@ class VllmClient:
         system_prompt: str = "", 
         history: list | None = None,
         max_tokens: int | None = None,
-        temperature: float | None = None
+        temperature: float | None = None,
+        extra_body: dict | None = None
     ) -> str:
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -128,7 +138,8 @@ class VllmClient:
             "system_prompt": system_prompt,
             "history": history or [],
             "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": temperature,
+            "extra_body": extra_body or {},
         }
         
         async with aiohttp.ClientSession() as session:
@@ -146,7 +157,8 @@ class VllmClient:
         system_prompt: str = "", 
         history: list | None = None,
         max_tokens: int | None = None,
-        temperature: float | None = None
+        temperature: float | None = None,
+        extra_body: dict | None = None
     ):
         if max_tokens is None:
             max_tokens = self.max_tokens
@@ -160,7 +172,8 @@ class VllmClient:
             "system_prompt": system_prompt,
             "history": history or [],
             "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": temperature,
+            "extra_body": extra_body or {},
         }
         
         async with aiohttp.ClientSession() as session:
