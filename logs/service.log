@@ -213,3 +213,6 @@
 2025-03-02 18:21:02 | ERROR | Error: 500, {"detail":"OpenAI API error: Connection error."}
 2025-03-02 18:21:02 | ERROR | Error: 500, {"detail":"OpenAI API error: Connection error."}
 2025-03-02 18:21:02 | ERROR | Error: 500, {"detail":"OpenAI API error: Connection error."}
+2025-04-22 20:28:30 | INFO | Failed to parse JSON
+2025-04-22 20:28:30 | ERROR | expected string or bytes-like object, got 'coroutine'
+2025-04-22 20:28:30 | ERROR | expected string or bytes-like object, got 'coroutine'

@@ -174,7 +174,7 @@ def test_get_fund_names(image_path: str):
         "image_base64": image_base64
     }
     
-    response = requests.post(
+    response = requests.post( 
         url=url,
         json=json_data,
         headers={"Content-Type": "application/json"}
@@ -232,11 +232,17 @@ def test_add_fund_names():
     
     
 if __name__ == "__main__":
-    BASE_URL = "http://localhost:8000"
-    # BASE_URL = "http://10.101.100.13:8010"
+    # BASE_URL = "http://localhost:8008"
+    BASE_URL = "http://10.101.100.13:8010"
     
     # test_correction()
-    # test_summary()
-    test_check()
-    # test_get_fund_names(image_path="image/万家01.jpg")
+    
+    test_summary()
+
+    # test_check()
+    
+    # image_path = "image/万家01.jpg"
+    # image_path = "image/fund_names_01.png"
+    # test_get_fund_names(image_path=image_path)
+    
     # test_add_fund_names()

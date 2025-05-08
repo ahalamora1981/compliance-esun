@@ -19,11 +19,6 @@ VLLM_PORT_QWEN = config["vllm-qwen25-72b"]["port"]
 MAX_TOKENS_QWEN = config["vllm-qwen25-72b"]["max_tokens"]
 TEMPERATURE_QWEN = config["vllm-qwen25-72b"]["temperature"]
 
-VLLM_HOST_DEEPSEEK = config["vllm-deepseek-r1-32b"]["host"]
-VLLM_PORT_DEEPSEEK = config["vllm-deepseek-r1-32b"]["port"]
-MAX_TOKENS_DEEPSEEK = config["vllm-deepseek-r1-32b"]["max_tokens"]
-TEMPERATURE_DEEPSEEK = config["vllm-deepseek-r1-32b"]["temperature"]
-
 
 def timer(func):
     def wrapper(*args, **kwargs):
