@@ -145,7 +145,7 @@ def test_summary():
 def test_check():
     url = f"{BASE_URL}/check-task"
     
-    file_name = "check_task_request_test.json"
+    file_name = "check_task_request_1.json"
     with open(Path(__file__).parent / "prompts" / "check" / file_name, "r") as f:
         request_data = json.load(f)
     
@@ -237,9 +237,9 @@ if __name__ == "__main__":
     
     # test_correction()
     
-    test_summary()
+    # test_summary()
 
-    # test_check()
+    test_check()
     
     # image_path = "image/万家01.jpg"
     # image_path = "image/fund_names_01.png"
